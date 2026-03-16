@@ -690,13 +690,37 @@ function drawStopMarkers() {
   });
 }
 
-function makeBusIcon(route) {
+function makeBusIcon(route, bearing) {
+  const rot = bearing != null ? bearing : 0;
   return L.divIcon({
-    html: `<div style="background:#ff6b35;color:#fff;font-weight:700;
-      font-family:'DM Mono',monospace;font-size:11px;
-      padding:3px 6px;border-radius:6px;border:2px solid #0a1628;
-      box-shadow:0 2px 8px rgba(0,0,0,0.5);white-space:nowrap;">${route}</div>`,
-    className: '', iconAnchor: [20, 10]
+    html: `<div style="
+      transform: rotate(${rot}deg);
+      width: 36px; height: 36px;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      position: relative;
+    ">
+      <div style="
+        position: absolute; top: 0; left: 50%;
+        transform: translateX(-50%);
+        width: 0; height: 0;
+        border-left: 5px solid transparent;
+        border-right: 5px solid transparent;
+        border-bottom: 8px solid #ff6b35;
+      "></div>
+      <div style="
+        margin-top: 6px;
+        background: #ff6b35; color: #fff; font-weight: 700;
+        font-family: 'DM Mono', monospace; font-size: 11px;
+        padding: 3px 6px; border-radius: 6px;
+        border: 2px solid #0a1628;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+        white-space: nowrap;
+      ">${route}</div>
+    </div>`,
+    className: '',
+    iconSize: [36, 44],
+    iconAnchor: [18, 22]
   });
 }
 
@@ -709,7 +733,7 @@ function updateBusMarkers(vehs) {
     if (busMarkers[v.vehicleRef]) {
       busMarkers[v.vehicleRef].setLatLng([v.lat, v.lng]);
     } else {
-      busMarkers[v.vehicleRef] = L.marker([v.lat, v.lng], { icon: makeBusIcon(v.route) })
+      busMarkers[v.vehicleRef] = L.marker([v.lat, v.lng], { icon: makeBusIcon(v.route, v.bearing) })
         .addTo(map)
         .bindPopup(`<b>${v.route}</b> → ${v.destination}<br>${v.recordedAt}`);
     }
