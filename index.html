@@ -500,10 +500,23 @@ let pickedEmoji  = '🏠';
 // Storage
 // ════════════════════════════════════════════════
 function loadStops() {
-  try { stops = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY)) || [...DEFAULT_STOPS]; }
-  catch { stops = [...DEFAULT_STOPS]; }
-  try { activeId = localStorage.getItem(CONFIG.ACTIVE_KEY) || stops[0]?.id || null; }
-  catch { activeId = stops[0]?.id || null; }
+  try {
+    const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY)) || [];
+    // Always ensure default stops are present by id
+    const savedIds = new Set(saved.map(s => s.id));
+    const merged = [
+      ...DEFAULT_STOPS.filter(s => !savedIds.has(s.id)),
+      ...saved
+    ];
+    stops = merged.length ? merged : [...DEFAULT_STOPS];
+  } catch {
+    stops = [...DEFAULT_STOPS];
+  }
+  try {
+    activeId = localStorage.getItem(CONFIG.ACTIVE_KEY) || stops[0]?.id || null;
+  } catch {
+    activeId = stops[0]?.id || null;
+  }
 }
 function saveAll() {
   localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(stops));
