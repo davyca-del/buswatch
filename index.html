@@ -500,23 +500,20 @@ let pickedEmoji  = '🏠';
 // Storage
 // ════════════════════════════════════════════════
 function loadStops() {
+  // Always start with DEFAULT_STOPS as the base
+  stops = [...DEFAULT_STOPS];
+  
+  // Merge in any user-added stops from localStorage (non-default ids only)
   try {
     const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY)) || [];
-    // Always ensure default stops are present by id
-    const savedIds = new Set(saved.map(s => s.id));
-    const merged = [
-      ...DEFAULT_STOPS.filter(s => !savedIds.has(s.id)),
-      ...saved
-    ];
-    stops = merged.length ? merged : [...DEFAULT_STOPS];
-  } catch {
-    stops = [...DEFAULT_STOPS];
-  }
+    const defaultIds = new Set(DEFAULT_STOPS.map(s => s.id));
+    const userAdded = saved.filter(s => !defaultIds.has(s.id));
+    stops = [...DEFAULT_STOPS, ...userAdded];
+  } catch {}
+
   try {
     activeId = localStorage.getItem(CONFIG.ACTIVE_KEY) || stops[0]?.id || null;
-  } catch {
-    activeId = stops[0]?.id || null;
-  }
+  } catch {}
 }
 function saveAll() {
   localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(stops));
