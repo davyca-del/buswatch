@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
   <meta name="theme-color" content="#0a1628">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>BusWatch</title>
@@ -141,26 +142,6 @@
     /* ── Map view ── */
     #map-view { position: relative; }
     #map { width: 100%; height: 100%; }
-    .map-overlay {
-      position: absolute; bottom: 16px; left: 16px; right: 16px;
-      background: rgba(10,22,40,0.92); backdrop-filter: blur(8px);
-      border: 1px solid var(--border); border-radius: 12px;
-      padding: 12px 16px; z-index: 1000; pointer-events: none;
-    }
-    .map-overlay-title {
-      font-size: 0.67rem; color: var(--muted); text-transform: uppercase;
-      letter-spacing: 0.08em; font-family: var(--font-mono); margin-bottom: 8px;
-    }
-    .bus-list { display: flex; flex-direction: column; gap: 6px; }
-    .bus-row { display: flex; align-items: center; gap: 10px; }
-    .bus-row .badge {
-      background: var(--accent); color: var(--bg); font-weight: 700;
-      font-family: var(--font-mono); font-size: 0.72rem; border-radius: 5px;
-      padding: 2px 7px; min-width: 34px; text-align: center;
-    }
-    .bus-row .dest { flex: 1; color: var(--text); font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .bus-row .eta  { font-family: var(--font-mono); color: var(--accent); font-size: 0.8rem; }
-    .no-buses-map  { color: var(--muted); font-size: 0.75rem; font-family: var(--font-mono); }
     .leaflet-tile  { filter: brightness(0.85) saturate(0.9) hue-rotate(180deg) invert(1); }
     .leaflet-container { background: #0a1628; }
 
@@ -178,7 +159,7 @@
       border-radius: 20px 20px 0 0; z-index: 2001;
       transform: translateY(100%);
       transition: transform 0.3s cubic-bezier(0.32,0.72,0,1);
-      max-height: 85dvh; display: flex; flex-direction: column; overflow: hidden;
+      max-height: 90dvh; display: flex; flex-direction: column; overflow: hidden;
     }
     .sheet.open { transform: translateY(0); }
     .sheet-handle {
@@ -303,6 +284,14 @@
       font-size: 0.84rem; cursor: pointer;
     }
     .btn-cancel:hover { color: var(--text); }
+
+    /* ── Coords helper note ── */
+    .coords-note {
+      background: var(--bg); border: 1px solid var(--border);
+      border-radius: 8px; padding: 8px 10px;
+      font-size: 0.7rem; color: var(--muted); line-height: 1.5;
+    }
+    .coords-note strong { color: var(--accent); }
   </style>
 </head>
 <body>
@@ -317,6 +306,7 @@
     </div>
     <span class="chevron">▾</span>
   </div>
+  <button class="icon-btn" id="alertBtn" onclick="toggleAlerts()" title="Toggle alerts">🔔</button>
   <button class="icon-btn" id="refreshBtn" onclick="refresh()" title="Refresh">↻</button>
 </header>
 
@@ -361,7 +351,6 @@
   <div class="add-form" id="addForm">
     <div class="add-form-title">New stop</div>
 
-    <!-- Step 1: ATCO code -->
     <div class="form-row">
       <div class="form-field">
         <label>ATCO code</label>
@@ -374,10 +363,9 @@
     <div class="lookup-helper">
       <div class="lookup-helper-icon">🔗</div>
       <div class="lookup-helper-body">
-        <div class="lookup-helper-title">Find coordinates</div>
+        <div class="lookup-helper-title">Find SMS code</div>
         <div class="lookup-helper-text">
-          Enter your ATCO code above, then open the stop page on bustimes.org.
-          The latitude and longitude are shown on that page — copy them into the fields below.
+          Enter your ATCO code above, then open the stop on bustimes.org to find the SMS code shown in brackets next to the stop name.
         </div>
         <span id="lookupLinkWrap">
           <span class="lookup-link-placeholder">Enter ATCO code first</span>
@@ -385,7 +373,19 @@
       </div>
     </div>
 
-    <!-- Step 2: coordinates -->
+    <div class="form-row">
+      <div class="form-field">
+        <label>SMS code</label>
+        <input id="fSms" type="text" placeholder="e.g. glodpjgp" maxlength="12"
+               oninput="this.value=this.value.toLowerCase()">
+      </div>
+    </div>
+
+    <!-- Coordinates -->
+    <div class="coords-note">
+      <strong>📍 Finding coordinates on mobile:</strong> Open Google Maps, navigate to the bus stop, then <strong>long press</strong> on the exact location. The latitude and longitude appear at the top of the screen — tap them to copy.
+    </div>
+
     <div class="form-row">
       <div class="form-field">
         <label>Latitude</label>
@@ -397,7 +397,6 @@
       </div>
     </div>
 
-    <!-- Step 3: name + icon -->
     <div class="form-row">
       <div class="form-field">
         <label>Your name for this stop</label>
@@ -431,8 +430,9 @@ const CONFIG = {
   ACTIVE_KEY:       'buswatch_active_v3',
 };
 
-const EMOJIS = ['🏠','🏢','🛒','🎓','🏥','⚽','🌳','🚉','🍺','🏋️','📍','🏪'];
+const EMOJIS = ['🚏','🚌','🏠','🏢','🛒','🎓','🏥','⚽','🌳','🚉','🍺','🏋️'];
 
+// ── DEFAULT STOPS — hardcoded, always present ──
 const DEFAULT_STOPS = [
   {
     id:   's1',
@@ -494,7 +494,10 @@ let mapReady     = false;
 let refreshTimer = null;
 let lastDeps     = [];
 let lastVehs     = [];
-let pickedEmoji  = '🏠';
+let pickedEmoji  = '🚏';
+let alertsEnabled   = false;
+let alertedKeys     = new Set();
+let alertThresholds = [5, 10];
 
 // ════════════════════════════════════════════════
 // Storage
@@ -502,12 +505,12 @@ let pickedEmoji  = '🏠';
 function loadStops() {
   // Always start with DEFAULT_STOPS as the base
   stops = [...DEFAULT_STOPS];
-  
+
   // Merge in any user-added stops from localStorage (non-default ids only)
   try {
     const saved = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY)) || [];
     const defaultIds = new Set(DEFAULT_STOPS.map(s => s.id));
-    const userAdded = saved.filter(s => !defaultIds.has(s.id));
+    const userAdded  = saved.filter(s => !defaultIds.has(s.id));
     stops = [...DEFAULT_STOPS, ...userAdded];
   } catch {}
 
@@ -515,11 +518,62 @@ function loadStops() {
     activeId = localStorage.getItem(CONFIG.ACTIVE_KEY) || stops[0]?.id || null;
   } catch {}
 }
+
 function saveAll() {
   localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(stops));
   localStorage.setItem(CONFIG.ACTIVE_KEY, activeId || '');
 }
+
 function getActive() { return stops.find(s => s.id === activeId) || stops[0] || null; }
+
+// ════════════════════════════════════════════════
+// Shared stops — GitHub via worker
+// ════════════════════════════════════════════════
+async function loadSharedStops() {
+  try {
+    const r = await fetch(`${CONFIG.WORKER_URL}/stops`);
+    if (!r.ok) return;
+    const shared = await r.json();
+    if (!shared.length) return;
+
+    const defaultAtcos = new Set(DEFAULT_STOPS.map(s => s.atco));
+    const userAdded    = shared.filter(s => !defaultAtcos.has(s.atco));
+
+    stops = [...DEFAULT_STOPS, ...userAdded];
+    saveAll();
+
+    if (!stops.find(s => s.id === activeId)) {
+      activeId = stops[0]?.id || null;
+    }
+    updateHeader();
+    renderList();
+    if (mapReady) drawStopMarkers();
+  } catch (err) {
+    console.warn('loadSharedStops error:', err);
+  }
+}
+
+async function saveSharedStop(stop) {
+  try {
+    await fetch(`${CONFIG.WORKER_URL}/stops`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(stop),
+    });
+  } catch (err) {
+    console.warn('saveSharedStop error:', err);
+  }
+}
+
+async function deleteSharedStop(atco) {
+  try {
+    await fetch(`${CONFIG.WORKER_URL}/stops/${encodeURIComponent(atco)}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.warn('deleteSharedStop error:', err);
+  }
+}
 
 // ════════════════════════════════════════════════
 // Header + status
@@ -530,10 +584,67 @@ function updateHeader() {
   document.getElementById('selName').textContent = s ? s.name : 'Select a stop';
   document.getElementById('selAtco').textContent = s ? s.atco : '—';
 }
+
 function setStatus(msg, state = 'idle') {
   document.getElementById('statusText').textContent = msg;
   document.getElementById('statusDot').className =
     'status-dot' + (state === 'live' ? ' live' : state === 'error' ? ' error' : '');
+}
+
+// ════════════════════════════════════════════════
+// Notifications / Alerts
+// ════════════════════════════════════════════════
+async function toggleAlerts() {
+  if (!('Notification' in window)) {
+    alert('This browser does not support notifications.');
+    return;
+  }
+  if (!alertsEnabled) {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      alert('Notification permission denied. Please enable it in your browser settings.');
+      return;
+    }
+    alertsEnabled = true;
+    alertedKeys.clear();
+    const btn = document.getElementById('alertBtn');
+    btn.style.background = 'var(--live)';
+    btn.style.color = 'var(--bg)';
+    btn.textContent = '🔔';
+  } else {
+    alertsEnabled = false;
+    const btn = document.getElementById('alertBtn');
+    btn.style.background = '';
+    btn.style.color = '';
+    btn.textContent = '🔕';
+  }
+}
+
+function checkAlerts(departures) {
+  if (!alertsEnabled || Notification.permission !== 'granted') return;
+  const stop = getActive();
+  if (!stop) return;
+  const now = new Date();
+
+  departures.forEach(dep => {
+    const time = dep.expectedDeparture || dep.aimedDeparture;
+    if (!time) return;
+    const mins = Math.round((new Date(time) - now) / 60000);
+
+    alertThresholds.forEach(threshold => {
+      if (mins >= threshold - 1 && mins <= threshold) {
+        const key = `${dep.route}-${time}-${threshold}`;
+        if (alertedKeys.has(key)) return;
+        alertedKeys.add(key);
+        new Notification(`🚌 ${dep.route} — ${mins} min${mins !== 1 ? 's' : ''}`, {
+          body: `${dep.destination} · arriving at ${stop.name}`,
+          tag:  key,
+        });
+      }
+    });
+  });
+
+  if (alertedKeys.size > 100) alertedKeys.clear();
 }
 
 // ════════════════════════════════════════════════
@@ -544,6 +655,7 @@ function openSheet() {
   document.getElementById('backdrop').classList.add('open');
   document.getElementById('sheet').classList.add('open');
 }
+
 function closeSheet() {
   document.getElementById('backdrop').classList.remove('open');
   document.getElementById('sheet').classList.remove('open');
@@ -591,10 +703,10 @@ function delStop(ev, id) {
   ev.stopPropagation();
   if (stops.length <= 1) { alert('You need at least one stop.'); return; }
   const removed = stops.find(s => s.id === id);
-stops = stops.filter(s => s.id !== id);
-if (activeId === id) activeId = stops[0].id;
-saveAll();
-if (removed) deleteSharedStop(removed.atco);
+  stops = stops.filter(s => s.id !== id);
+  if (activeId === id) activeId = stops[0].id;
+  saveAll();
+  if (removed) deleteSharedStop(removed.atco);
   updateHeader();
   renderList();
   if (mapReady) drawStopMarkers();
@@ -617,7 +729,7 @@ function cancelForm() {
   document.getElementById('addToggle').style.display = 'flex';
   document.getElementById('formErr').classList.remove('show');
   document.getElementById('formErr').textContent = '';
-  ['fAtco','fLat','fLng','fName'].forEach(id => {
+  ['fAtco','fSms','fLat','fLng','fName'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.value = '';
   });
@@ -625,7 +737,6 @@ function cancelForm() {
     '<span class="lookup-link-placeholder">Enter ATCO code first</span>';
 }
 
-// Update the bustimes.org link as the user types the ATCO code
 function onAtcoChange() {
   const atco = document.getElementById('fAtco').value.trim();
   const wrap = document.getElementById('lookupLinkWrap');
@@ -639,7 +750,7 @@ function onAtcoChange() {
 }
 
 function buildEmojiPicker() {
-  pickedEmoji = '🏠';
+  pickedEmoji = '🚏';
   document.getElementById('emojiRow').innerHTML = EMOJIS.map(e =>
     `<div class="emoji-opt ${e === pickedEmoji ? 'sel' : ''}" onclick="pickEmoji(this,'${e}')">${e}</div>`
   ).join('');
@@ -653,11 +764,13 @@ function pickEmoji(el, e) {
 
 function saveStop() {
   const atco = document.getElementById('fAtco').value.trim().toUpperCase();
+  const sms  = document.getElementById('fSms').value.trim().toLowerCase();
   const lat  = parseFloat(document.getElementById('fLat').value);
   const lng  = parseFloat(document.getElementById('fLng').value);
   const name = document.getElementById('fName').value.trim();
   const err  = document.getElementById('formErr');
 
+  // Validate
   if (!atco) {
     err.textContent = 'Please enter an ATCO code.';
     err.classList.add('show'); return;
@@ -667,7 +780,7 @@ function saveStop() {
     err.classList.add('show'); return;
   }
   if (isNaN(lat) || isNaN(lng)) {
-    err.textContent = 'Please enter the latitude and longitude from bustimes.org.';
+    err.textContent = 'Please enter the latitude and longitude (long press on Google Maps).';
     err.classList.add('show'); return;
   }
   if (!name) {
@@ -676,10 +789,17 @@ function saveStop() {
   }
 
   err.classList.remove('show');
-  const newStop = { id: 's' + Date.now(), name, atco, lat, lng, icon: pickedEmoji, sms };
-stops.push(newStop);
-saveAll();
-saveSharedStop(newStop);
+
+  const newStop = {
+    id:   's' + Date.now(),
+    name, atco, lat, lng,
+    icon: pickedEmoji,
+    sms:  sms || '',
+  };
+
+  stops.push(newStop);
+  saveAll();
+  saveSharedStop(newStop);  // save to GitHub for all users
   cancelForm();
   renderList();
   if (mapReady) drawStopMarkers();
@@ -746,21 +866,19 @@ function makeBusIcon(route, bearing) {
   return L.divIcon({
     html: `<div style="
       transform: rotate(${rot}deg);
-      width: 36px; height: 36px;
+      width: 36px; height: 44px;
       display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
+      align-items: center; justify-content: flex-start;
       position: relative;
     ">
       <div style="
-        position: absolute; top: 0; left: 50%;
-        transform: translateX(-50%);
         width: 0; height: 0;
         border-left: 5px solid transparent;
         border-right: 5px solid transparent;
         border-bottom: 8px solid #ff6b35;
+        margin-bottom: 2px;
       "></div>
       <div style="
-        margin-top: 6px;
         background: #ff6b35; color: #fff; font-weight: 700;
         font-family: 'DM Mono', monospace; font-size: 11px;
         padding: 3px 6px; border-radius: 6px;
@@ -792,14 +910,6 @@ function updateBusMarkers(vehs) {
   Object.keys(busMarkers).forEach(k => {
     if (!seen.has(k)) { map.removeLayer(busMarkers[k]); delete busMarkers[k]; }
   });
-  const bl = document.getElementById('busList');
-  if (!vehs.length) { bl.innerHTML = '<div class="no-buses-map">No buses in range</div>'; return; }
-  bl.innerHTML = vehs.slice(0, 5).map(v => `
-    <div class="bus-row">
-      <span class="badge">${v.route}</span>
-      <span class="dest">${v.destination}</span>
-      <span class="eta">${v.bearing ? bearDir(v.bearing) : ''}</span>
-    </div>`).join('');
 }
 
 function bearDir(d) {
@@ -815,6 +925,7 @@ async function fetchDeps(stop) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.json();
 }
+
 async function fetchVehs(stop) {
   const p = CONFIG.BBOX_PAD;
   const r = await fetch(`${CONFIG.WORKER_URL}/vehicles?bbox=${stop.lat-p},${stop.lat+p},${stop.lng-p},${stop.lng+p}`);
@@ -829,6 +940,7 @@ function minsUntil(iso) {
   if (!iso) return null;
   return Math.round((new Date(iso) - new Date()) / 60000);
 }
+
 function fmtTime(iso) {
   if (!iso) return '--:--';
   return new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -860,10 +972,10 @@ function renderDeps(deps) {
     }
 
     let txt, cls;
-    if (mins === null)  { txt = '--';       cls = ''; }
-    else if (mins <= 0) { txt = 'Due';      cls = 'due-now'; }
-    else if (mins <= 5) { txt = `${mins}`;  cls = 'due-soon'; }
-    else                { txt = `${mins}`;  cls = 'due-ok'; }
+    if (mins === null)   { txt = '--';      cls = ''; }
+    else if (mins <= 0)  { txt = 'Due';     cls = 'due-now'; }
+    else if (mins <= 5)  { txt = `${mins}`; cls = 'due-soon'; }
+    else                 { txt = `${mins}`; cls = 'due-ok'; }
 
     const card = document.createElement('div');
     card.className = 'departure-card';
@@ -894,11 +1006,21 @@ async function refresh() {
 
   const [r1, r2] = await Promise.allSettled([fetchDeps(stop), fetchVehs(stop)]);
 
-  if (r1.status === 'fulfilled') { lastDeps = r1.value; renderDeps(lastDeps); }
-  else { console.warn(r1.reason); renderDeps(null); }
+  if (r1.status === 'fulfilled') {
+    lastDeps = r1.value;
+    renderDeps(lastDeps);
+    checkAlerts(lastDeps);
+  } else {
+    console.warn(r1.reason);
+    renderDeps(null);
+  }
 
-  if (r2.status === 'fulfilled') { lastVehs = r2.value; if (mapReady) updateBusMarkers(lastVehs); }
-  else { lastVehs = []; }
+  if (r2.status === 'fulfilled') {
+    lastVehs = r2.value;
+    if (mapReady) updateBusMarkers(lastVehs);
+  } else {
+    lastVehs = [];
+  }
 
   const anyLive = lastDeps.some(d => d.expectedDeparture);
   const now = new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
@@ -913,61 +1035,14 @@ async function refresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(refresh, CONFIG.REFRESH_INTERVAL);
 }
-  
-// ── Shared stops (GitHub) ─────────────────────────────────
-async function loadSharedStops() {
-  try {
-    const r = await fetch(`${CONFIG.WORKER_URL}/stops`);
-    if (!r.ok) return;
-    const shared = await r.json();
-    if (!shared.length) return;
-
-    const defaultAtcos = new Set(DEFAULT_STOPS.map(s => s.atco));
-    const userAdded    = shared.filter(s => !defaultAtcos.has(s.atco));
-
-    stops = [...DEFAULT_STOPS, ...userAdded];
-    localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(stops));
-
-    if (!stops.find(s => s.id === activeId)) {
-      activeId = stops[0]?.id || null;
-    }
-    updateHeader();
-    renderList();
-    if (mapReady) drawStopMarkers();
-  } catch (err) {
-    console.warn('loadSharedStops error:', err);
-  }
-}
-
-async function saveSharedStop(stop) {
-  try {
-    await fetch(`${CONFIG.WORKER_URL}/stops`, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body:    JSON.stringify(stop),
-    });
-  } catch (err) {
-    console.warn('saveSharedStop error:', err);
-  }
-}
-
-async function deleteSharedStop(atco) {
-  try {
-    await fetch(`${CONFIG.WORKER_URL}/stops/${encodeURIComponent(atco)}`, {
-      method: 'DELETE',
-    });
-  } catch (err) {
-    console.warn('deleteSharedStop error:', err);
-  }
-}
 
 // ════════════════════════════════════════════════
 // Boot
 // ════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
   loadStops();
-updateHeader();
-loadSharedStops();
+  updateHeader();
+  loadSharedStops();
   const s = getActive();
   if (s) { setStatus(`Connecting — ${s.name}…`); refresh(); }
   else   { setStatus('Add a stop to get started'); }
