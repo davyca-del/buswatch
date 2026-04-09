@@ -590,9 +590,11 @@ function pickStop(id) {
 function delStop(ev, id) {
   ev.stopPropagation();
   if (stops.length <= 1) { alert('You need at least one stop.'); return; }
-  stops = stops.filter(s => s.id !== id);
-  if (activeId === id) activeId = stops[0].id;
-  saveAll();
+  const removed = stops.find(s => s.id === id);
+stops = stops.filter(s => s.id !== id);
+if (activeId === id) activeId = stops[0].id;
+saveAll();
+if (removed) deleteSharedStop(removed.atco);
   updateHeader();
   renderList();
   if (mapReady) drawStopMarkers();
@@ -674,8 +676,10 @@ function saveStop() {
   }
 
   err.classList.remove('show');
-  stops.push({ id: 's' + Date.now(), name, atco, lat, lng, icon: pickedEmoji });
-  saveAll();
+  const newStop = { id: 's' + Date.now(), name, atco, lat, lng, icon: pickedEmoji, sms };
+stops.push(newStop);
+saveAll();
+saveSharedStop(newStop);
   cancelForm();
   renderList();
   if (mapReady) drawStopMarkers();
@@ -909,13 +913,61 @@ async function refresh() {
   clearTimeout(refreshTimer);
   refreshTimer = setTimeout(refresh, CONFIG.REFRESH_INTERVAL);
 }
+  
+// ── Shared stops (GitHub) ─────────────────────────────────
+async function loadSharedStops() {
+  try {
+    const r = await fetch(`${CONFIG.WORKER_URL}/stops`);
+    if (!r.ok) return;
+    const shared = await r.json();
+    if (!shared.length) return;
+
+    const defaultAtcos = new Set(DEFAULT_STOPS.map(s => s.atco));
+    const userAdded    = shared.filter(s => !defaultAtcos.has(s.atco));
+
+    stops = [...DEFAULT_STOPS, ...userAdded];
+    localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify(stops));
+
+    if (!stops.find(s => s.id === activeId)) {
+      activeId = stops[0]?.id || null;
+    }
+    updateHeader();
+    renderList();
+    if (mapReady) drawStopMarkers();
+  } catch (err) {
+    console.warn('loadSharedStops error:', err);
+  }
+}
+
+async function saveSharedStop(stop) {
+  try {
+    await fetch(`${CONFIG.WORKER_URL}/stops`, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(stop),
+    });
+  } catch (err) {
+    console.warn('saveSharedStop error:', err);
+  }
+}
+
+async function deleteSharedStop(atco) {
+  try {
+    await fetch(`${CONFIG.WORKER_URL}/stops/${encodeURIComponent(atco)}`, {
+      method: 'DELETE',
+    });
+  } catch (err) {
+    console.warn('deleteSharedStop error:', err);
+  }
+}
 
 // ════════════════════════════════════════════════
 // Boot
 // ════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', () => {
   loadStops();
-  updateHeader();
+updateHeader();
+loadSharedStops();
   const s = getActive();
   if (s) { setStatus(`Connecting — ${s.name}…`); refresh(); }
   else   { setStatus('Add a stop to get started'); }
